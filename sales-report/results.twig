@@ -1,0 +1,104 @@
+{% set salesReports = [] %}
+{% set orders = craft.orders() %}
+{# FILETR DATE RANGE #}
+{% if settings.limitByDateRange == 1 %}
+    {% set orders = orders.dateCreated(['and', ">= #{settings.datetimeStartDate.date}", "< #{settings.datetimeEndDate.date}"]) %}
+{% endif %}
+
+{% set orders = orders.all() %}
+
+{% for order in orders %}
+    {% if order.reference != '' %}
+        {% set salesReport = [] %}
+        {# Fetch Vat #}
+        {% set adminFee = 0 %}
+        {% set price = 0 %}
+        {% set vat = 0 %}
+        {% set description = '' %}
+        {% set eventId = '' %}
+        {% if order.lineItems | length or order.totalPrice > 0 %}
+            {% for lineItem in order.lineItems %}
+                {% if lineItem.purchasable %}
+                    {% set description = lineItem.description %}
+                    {% if lineItem.snapshot.eventId is defined %}
+                        {% set eventId = 'E'~lineItem.snapshot.eventId %}
+                    {% elseif lineItem.snapshot.productId is defined %}
+                        {% set eventId = 'P'~lineItem.snapshot.productId %}
+                    {% endif %}
+                    {% if lineItem.sku == "ETICKET-FEE" %}
+                        {% set currentAdminFee = lineItem.salePrice * lineItem.qty %}
+                        {% set adminFee = adminFee + currentAdminFee %}
+                    {% else %}
+                        {% set currentItem = lineItem.salePrice * lineItem.qty %}
+                        {% set price = price + currentItem %}
+                    {% endif %}
+                    {# {{ lineItem.salePrice|currency(order.currency) }} #}
+                    {% for adjustment in lineItem.adjustments %}
+                        {% set vat = vat + adjustment.amount %}
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+        {% endif %}
+        {# ADMIN FEE FILTER #}
+        {% if settings.adminFee %}
+            {% set orderPrice = order.totalPrice - adminFee %}
+        {% else %}
+            {% set orderPrice = order.totalPrice %}
+        {% endif %}
+        {# Fetch the user by its ID #}
+        {% set user = craft.users().id(order.customer.user.id).one() %}
+        {% if user %}
+            {% set ucr = user.ucr %}
+        {% else %}
+            {% set ucr = "" %}
+        {% endif %}
+        {% set salesReport = salesReport|merge({
+            'sage'          :   'SI',
+            'ucr'           :   ucr,
+            'nominal'       :   '4001',
+            'department'    :   eventId,
+            'date'          :   "order.dateOrdered.date |date('d/m/Y h:i')",
+            'orderReference':   order.reference,
+            'description'   :   description,
+            'net'           :   orderPrice|number_format(2),
+            'taxcode'       :   'T1',
+            'vat'           :   vat|number_format(2),
+        }) %}
+        {% set salesReports = salesReports|merge([salesReport]) %}
+    {% endif %}
+{% endfor %}
+{# FILETR UCR #}
+{% if settings.ucr%}
+    {% set filterReport = [] %}
+    {% for report in salesReports if report.ucr == settings.ucr %}
+        {% set filterReport = filterReport|merge([report]) %}
+    {% endfor %}
+    {% set salesReports = filterReport %}
+{% endif %}
+
+{# FILETR DISCRIPTION #}
+{% if settings.description %}
+    {% set filterReport = [] %}
+    {% for report in salesReports if settings.description in report.description %}
+        {% set filterReport = filterReport|merge([report]) %}
+    {% endfor %}
+    {% set salesReports = filterReport %}
+{% endif %}
+
+
+{# Filter Array By Order Reference #}
+{% if settings.orderReference %}
+    {% set filterReport = [] %}
+    {% for report in salesReports if report.orderReference == settings.orderReference %}
+        {% set filterReport = filterReport|merge([report]) %}
+    {% endfor %}
+    {% set salesReports = filterReport %}
+{% endif %}
+
+
+{# addHeaderRow accepts a single array with a comma-separated list of values #}
+{% do craft.sproutReports.addHeaderRow(['Sage','A/C','Nominal Code','Department','Date','Reference','Description','Net','Tax Code','VAT'
+]) %}
+
+{# addRows, accepts an array of arrays, where each array includes a comma-separated list of values. Note that there are two levels of opening and closing square brackets. #}
+{% do craft.sproutReports.addRows(salesReports) %}

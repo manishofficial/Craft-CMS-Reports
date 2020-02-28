@@ -1,0 +1,48 @@
+{% set allUsers = [] %}
+
+{% set users = craft.users() %}
+
+{# FILETR DATE RANGE #}
+{% if settings.limitByDateRange == 1 %}
+    {% set users = users.dateCreated(['and', ">= #{settings.datetimeStartDate.date}", "< #{settings.datetimeEndDate.date}"]) %}
+{% endif %}
+
+{% set users = users.all() %}
+
+{% for user in users %}
+    {% set userArray = [] %}
+    {% set userArray = userArray|merge({
+        "sage" : "SI",
+        "ucr" : user.ucr,
+        "accountName" : user.firstName~" "~user.lastName,
+        "street1" : user.street1,
+        "street2" : user.street2,
+        "city" : user.city,
+        "country" : user.country,
+        "postCode" : user.postCode,
+        "contactName" : user.firstName,
+        "phone" : user.phone,
+        "mobile" : user.mobile,
+        "email" : user.email,
+        "dob" : user.dob|date('d-m-Y'),
+        "transponder" : user.transponder,
+        "aculicense" : user.aculicense,
+        "dateCreated" : user.dateCreated|date('d-m-Y h:i:s'),
+    }) %}
+    {% set allUsers = allUsers|merge([userArray]) %}
+{% endfor %}
+{# FILETR UCR #}
+{% if settings.ucr%}
+    {% set filterReport = [] %}
+    {% for report in allUsers if report.ucr == settings.ucr %}
+        {% set filterReport = filterReport|merge([report]) %}
+    {% endfor %}
+    {% set allUsers = filterReport %}
+{% endif %}
+
+{# addHeaderRow accepts a single array with a comma-separated list of values #}
+{% do craft.sproutReports.addHeaderRow(['Sage','A/C','Account Name','Street 1','Street 2','Town','Country','Post Code','Contact Name','Tel 1','Tel 2','Email','DOB','Transponder','ACU','Register Date'
+]) %}
+
+{# addRows, accepts an array of arrays, where each array includes a comma-separated list of values. Note that there are two levels of opening and closing square brackets. #}
+{% do craft.sproutReports.addRows(allUsers) %}

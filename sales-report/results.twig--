@@ -1,0 +1,88 @@
+{% set salesReports = [] %}
+{% set purchasedTickets = craft.events.purchasedTickets() %}
+{% if settings.description %}
+    {# Get the search query from string param #}
+    {% set searchQuery = settings.description %}
+
+    {# Fetch all purchased tickets that match the search query #}
+    {% set purchasedTickets = craft.events.purchasedTickets().search(searchQuery)%}
+{% endif %}
+
+{# FILETR DATE RANGE #}
+{% if settings.limitByDateRange == 1 %}
+    {% set purchasedTickets = purchasedTickets.dateCreated(['and', ">= #{settings.datetimeStartDate.date}", "< #{settings.datetimeEndDate.date}"]) %}
+{% endif %}
+
+{% set purchasedTickets = purchasedTickets.all() %}
+
+{% for purchasedTicket in purchasedTickets %}
+    {% set salesReport = [] %}
+    {# Fetch the order by its ID #}
+    {% set order = craft.orders().id(purchasedTicket.orderId).one() %}
+    {# Fetch adminFee #}
+    {% set adminFee = 0 %}
+    {% set price = 0 %}
+    {% set vat = 0 %}
+    {% if order.lineItems | length or order.totalPrice > 0 %}
+        {% for lineItem in order.lineItems %}
+            {% set price = price + lineItem.salePrice %}
+            {% if lineItem.sku == "ETICKET-FEE" %}
+                {% set adminFee = adminFee + lineItem.salePrice  %}
+            {% endif %}
+            {% for adjustment in lineItem.adjustments %}
+                {% set vat = vat + adjustment.amount %}
+            {% endfor %}
+        {% endfor %}
+        {# {% exit %} #}
+    {% endif %}
+    {% set orderPrice = order.totalPrice %}
+    {# VAT FILTER #}
+    {% if settings.adminFee %}
+        {% set orderPrice = price - adminFee %}
+    {% endif %}
+    {# Fetch the user by its ID #}
+    {% set user = craft.users().id(order.customer.user.id).one() %}
+    {% if user %}
+        {% set ucr = user.ucr %}
+    {% else %}
+        {% set ucr = "" %}
+    {% endif %}
+    {% set salesReport = salesReport|merge({
+        'sage'          :   'SI',
+        'ucr'           :   ucr,
+        'nominal'       :   '4001',
+        'department'    :   purchasedTicket.eventId,
+        'date'          :   order.dateOrdered.date |date('d/m/Y h:i'),
+        'orderReference':   order.reference,
+        'description'   :   purchasedTicket.event.title,
+        'net'           :   orderPrice|currency(order.currency),
+        'taxcode'       :   'T1',
+        'vat'           :   vat|currency(order.currency),
+    }) %}
+    {% set salesReports = salesReports|merge([salesReport]) %}
+{% endfor %}
+{# FILETR UCR #}
+{% if settings.ucr%}
+    {% set filterReport = [] %}
+    {% for report in salesReports if report.ucr == settings.ucr %}
+        {% set filterReport = filterReport|merge([report]) %}
+    {% endfor %}
+    {% set salesReports = filterReport %}
+{% endif %}
+
+{# Filter Array By Order Reference #}
+{% if settings.orderReference %}
+    {% set filterReport = [] %}
+    {% for report in salesReports if report.orderReference == settings.orderReference %}
+        {% set filterReport = filterReport|merge([report]) %}
+    {% endfor %}
+    {% set salesReports = filterReport %}
+{% endif %}
+
+
+{# addHeaderRow accepts a single array with a comma-separated list of values #}
+{% do craft.sproutReports.addHeaderRow(['Sage','A/C','Nominal Code','Department','Date','Reference','Description','Net','Tax Code','VAT'
+]) %}
+
+{# addRows, accepts an array of arrays, where each array includes a comma-separated list of values. Note that there are two levels of opening and closing square brackets. #}
+{% do craft.sproutReports.addRows(salesReports) %}
