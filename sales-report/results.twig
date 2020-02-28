@@ -11,6 +11,7 @@
     {% if order.reference != '' %}
         {% set salesReport = [] %}
         {# Fetch Vat #}
+        {% set orderPrice = 0 %}
         {% set adminFee = 0 %}
         {% set price = 0 %}
         {% set vat = 0 %}
@@ -26,47 +27,54 @@
                         {% set eventId = 'P'~lineItem.snapshot.productId %}
                     {% endif %}
                     {% if lineItem.sku == "ETICKET-FEE" %}
-                        {% set currentAdminFee = lineItem.salePrice * lineItem.qty %}
-                        {% set adminFee = adminFee + currentAdminFee %}
+                        {% set eventId = 'E-FEE'~lineItem.snapshot.productId %}
+                        {% set orderPrice = lineItem.salePrice * lineItem.qty %}
+                        {# {% set currentAdminFee = lineItem.salePrice * lineItem.qty %} #}
+                        {# {% set adminFee = adminFee + currentAdminFee %} #}
                     {% else %}
-                        {% set currentItem = lineItem.salePrice * lineItem.qty %}
-                        {% set price = price + currentItem %}
+                        {% set orderPrice = lineItem.salePrice * lineItem.qty %}
+                        {# {% set currentItem = lineItem.salePrice * lineItem.qty %} #}
+                        {# {% set price = price + currentItem %} #}
                     {% endif %}
                     {# {{ lineItem.salePrice|currency(order.currency) }} #}
                     {% for adjustment in lineItem.adjustments %}
                         {% set vat = vat + adjustment.amount %}
                     {% endfor %}
                 {% endif %}
+                {# Fetch the user by its ID #}
+                {% set user = craft.users().id(order.customer.user.id).one() %}
+                {% if user %}
+                    {% set ucr = user.ucr %}
+                {% else %}
+                    {% set ucr = "" %}
+                {% endif %}
+                {% set salesReport = salesReport|merge({
+                    'sage'          :   'SI',
+                    'ucr'           :   ucr,
+                    'nominal'       :   '4001',
+                    'department'    :   eventId,
+                    'date'          :   order.dateOrdered.date |date('d/m/Y h:i'),
+                    'orderReference':   order.reference,
+                    'description'   :   description,
+                    'net'           :   orderPrice|number_format(2),
+                    'taxcode'       :   'T1',
+                    'vat'           :   vat|number_format(2),
+                }) %}
+                {# ADMIN FEE FILTER #}
+                {% if settings.adminFee %}
+                    {# {% set orderPrice = order.totalPrice - adminFee %} #}
+                    {% if lineItem.sku != "ETICKET-FEE" %}
+                        {% set salesReports = salesReports|merge([salesReport]) %}
+                    {% endif %}
+                {% else %}
+                    {% set salesReports = salesReports|merge([salesReport]) %}
+                {% endif %}
             {% endfor %}
         {% endif %}
-        {# ADMIN FEE FILTER #}
-        {% if settings.adminFee %}
-            {% set orderPrice = order.totalPrice - adminFee %}
-        {% else %}
-            {% set orderPrice = order.totalPrice %}
-        {% endif %}
-        {# Fetch the user by its ID #}
-        {% set user = craft.users().id(order.customer.user.id).one() %}
-        {% if user %}
-            {% set ucr = user.ucr %}
-        {% else %}
-            {% set ucr = "" %}
-        {% endif %}
-        {% set salesReport = salesReport|merge({
-            'sage'          :   'SI',
-            'ucr'           :   ucr,
-            'nominal'       :   '4001',
-            'department'    :   eventId,
-            'date'          :   "order.dateOrdered.date |date('d/m/Y h:i')",
-            'orderReference':   order.reference,
-            'description'   :   description,
-            'net'           :   orderPrice|number_format(2),
-            'taxcode'       :   'T1',
-            'vat'           :   vat|number_format(2),
-        }) %}
-        {% set salesReports = salesReports|merge([salesReport]) %}
     {% endif %}
 {% endfor %}
+{# <pre>{{ dump(salesReports) }}</pre>
+{% exit %} #}
 {# FILETR UCR #}
 {% if settings.ucr%}
     {% set filterReport = [] %}
