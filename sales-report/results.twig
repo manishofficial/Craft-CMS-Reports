@@ -14,28 +14,24 @@
         {% set orderPrice = 0 %}
         {% set adminFee = 0 %}
         {% set price = 0 %}
-        {% set vat = 0 %}
         {% set description = '' %}
         {% set eventId = '' %}
         {% if order.lineItems | length or order.totalPrice > 0 %}
             {% for lineItem in order.lineItems %}
+                {% set vat = 0 %}
+                {% set ticketSku = '' %}
                 {% if lineItem.purchasable %}
                     {% set description = lineItem.description %}
                     {% if lineItem.snapshot.eventId is defined %}
                         {% set eventId = 'E'~lineItem.snapshot.eventId %}
+                        {% set ticketSku = lineItem.snapshot.sku %}
                     {% elseif lineItem.snapshot.productId is defined %}
                         {% set eventId = 'P'~lineItem.snapshot.productId %}
                     {% endif %}
                     {% if lineItem.sku == "ETICKET-FEE" %}
                         {% set eventId = 'E-FEE'~lineItem.snapshot.productId %}
-                        {% set orderPrice = lineItem.salePrice * lineItem.qty %}
-                        {# {% set currentAdminFee = lineItem.salePrice * lineItem.qty %} #}
-                        {# {% set adminFee = adminFee + currentAdminFee %} #}
-                    {% else %}
-                        {% set orderPrice = lineItem.salePrice * lineItem.qty %}
-                        {# {% set currentItem = lineItem.salePrice * lineItem.qty %} #}
-                        {# {% set price = price + currentItem %} #}
                     {% endif %}
+                    {% set orderPrice = lineItem.salePrice * lineItem.qty %}
                     {# {{ lineItem.salePrice|currency(order.currency) }} #}
                     {% for adjustment in lineItem.adjustments %}
                         {% set vat = vat + adjustment.amount %}
@@ -48,33 +44,50 @@
                 {% else %}
                     {% set ucr = "" %}
                 {% endif %}
-                {% set salesReport = salesReport|merge({
-                    'sage'          :   'SI',
-                    'ucr'           :   ucr,
-                    'nominal'       :   '4001',
-                    'department'    :   eventId,
-                    'date'          :   order.dateOrdered.date |date('d/m/Y h:i'),
-                    'orderReference':   order.reference,
-                    'description'   :   description,
-                    'net'           :   orderPrice|number_format(2),
-                    'taxcode'       :   'T1',
-                    'vat'           :   vat|number_format(2),
-                }) %}
-                {# ADMIN FEE FILTER #}
-                {% if settings.adminFee %}
-                    {# {% set orderPrice = order.totalPrice - adminFee %} #}
-                    {% if lineItem.sku != "ETICKET-FEE" %}
+
+                {% set purchasedTickets = craft.events.purchasedTickets()
+                    .lineItemId(lineItem.id)
+                    .all() %}
+                {% set purchasedTicketSkus = [] %}
+                {% for purchasedTicket in purchasedTickets %}
+                    {% set purchasedTicketSkus = purchasedTicketSkus|merge([purchasedTicket.ticketSku]) %}
+                {% endfor %}
+                {% for i in range(0, lineItem.qty-1) %}
+                    {% if purchasedTicketSkus[i] is defined %}
+                        {% set ticketSku = purchasedTicketSkus[i] %}
+                    {% else %}
+                        {% set ticketSku = "" %}
+                    {% endif %}
+                    {% set salesReport = salesReport|merge({
+                        'sage'          :   'SI',
+                        'ucr'           :   ucr,
+                        'nominal'       :   '4001',
+                        'department'    :   eventId,
+                        'date'          :   order.dateOrdered.date |date('d/m/Y h:i'),
+                        'orderReference':   order.reference,
+                        'description'   :   description,
+                        'net'           :   orderPrice-vat|number_format(2),
+                        'taxcode'       :   'T1',
+                        'vat'           :   vat|number_format(2),
+                        'ticketSku'     :   ticketSku,
+                    }) %}
+
+                    {# ADMIN FEE FILTER #}
+                    {% if settings.adminFee %}
+                        {# {% set orderPrice = order.totalPrice - adminFee %} #}
+                        {% if lineItem.sku != "ETICKET-FEE" %}
+                            {% set salesReports = salesReports|merge([salesReport]) %}
+                        {% endif %}
+                    {% else %}
                         {% set salesReports = salesReports|merge([salesReport]) %}
                     {% endif %}
-                {% else %}
-                    {% set salesReports = salesReports|merge([salesReport]) %}
-                {% endif %}
+                {% endfor %}
             {% endfor %}
         {% endif %}
     {% endif %}
 {% endfor %}
-{# <pre>{{ dump(salesReports) }}</pre>
-{% exit %} #}
+{# <pre>{{ dump(salesReports) }}</pre> #}
+{# {% exit %} #}
 {# FILETR UCR #}
 {% if settings.ucr%}
     {% set filterReport = [] %}
@@ -105,7 +118,7 @@
 
 
 {# addHeaderRow accepts a single array with a comma-separated list of values #}
-{% do craft.sproutReports.addHeaderRow(['Sage','A/C','Nominal Code','Department','Date','Reference','Description','Net','Tax Code','VAT'
+{% do craft.sproutReports.addHeaderRow(['Sage','A/C','Nominal Code','Department','Date','Reference','Description','Net','Tax Code','VAT','Ticket Reference'
 ]) %}
 
 {# addRows, accepts an array of arrays, where each array includes a comma-separated list of values. Note that there are two levels of opening and closing square brackets. #}
